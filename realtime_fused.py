@@ -20,7 +20,6 @@ Either model may be omitted; the pipeline degrades to whichever is present.
 """
 
 import argparse
-from collections import deque
 from pathlib import Path
 
 import cv2
@@ -29,17 +28,12 @@ import timm
 import torch
 
 from camutil import open_camera
+from fusion_core import Tracker, containment, fuse, upper_body_box
 from mp_face import FaceDetector
 
 LABELS = ["male", "female"]
 MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-
-SMOOTH_WINDOW = 10        # frames averaged per track
-TRACK_MAX_AGE = 15        # frames a track survives without a detection
-BODY_DISCOUNT = 0.6       # body model is systematically less reliable than face
-FACE_REF_PX = 48.0        # face size at which the face model gets full weight
-NEEDLE_EASE = 0.25        # how fast the slider chases its target (0-1)
 
 MALE_COLOR = (230, 150, 60)     # BGR — left end of the scale
 FEMALE_COLOR = (80, 120, 250)   # BGR — right end of the scale
@@ -79,31 +73,6 @@ def classify_batch(model, crops, size, device):
 
 # ─────────────────────────── geometry ───────────────────────────
 
-def iou(a, b):
-    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
-    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
-    inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
-    if inter == 0:
-        return 0.0
-    area_a = (a[2] - a[0]) * (a[3] - a[1])
-    area_b = (b[2] - b[0]) * (b[3] - b[1])
-    return inter / (area_a + area_b - inter)
-
-
-def containment(inner, outer):
-    """Fraction of `inner` that falls inside `outer`."""
-    ix1, iy1 = max(inner[0], outer[0]), max(inner[1], outer[1])
-    ix2, iy2 = min(inner[2], outer[2]), min(inner[3], outer[3])
-    inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
-    area = (inner[2] - inner[0]) * (inner[3] - inner[1])
-    return inter / max(area, 1)
-
-
-def upper_body_box(person_box, fraction=0.5):
-    x1, y1, x2, y2 = person_box
-    return x1, y1, x2, y1 + int((y2 - y1) * fraction)
-
-
 def crop(frame, box):
     x1, y1, x2, y2 = box
     h, w = frame.shape[:2]
@@ -112,75 +81,6 @@ def crop(frame, box):
     if x2 - x1 < 8 or y2 - y1 < 8:
         return None
     return frame[y1:y2, x1:x2]
-
-
-# ─────────────────────────── tracking ───────────────────────────
-
-class Tracker:
-    """Greedy IoU tracker. Enough for a webcam demo; swap for ByteTrack if you
-    need it to survive occlusion and crossing paths."""
-
-    def __init__(self):
-        self.tracks = {}
-        self.next_id = 0
-
-    def update(self, boxes):
-        for track in self.tracks.values():
-            track["age"] += 1
-
-        assigned, pairs = set(), []
-        for det_idx, box in enumerate(boxes):
-            best_id, best_iou = None, 0.3
-            for tid, track in self.tracks.items():
-                if tid in assigned:
-                    continue
-                score = iou(box, track["box"])
-                if score > best_iou:
-                    best_id, best_iou = tid, score
-            if best_id is None:
-                best_id = self.next_id
-                self.next_id += 1
-                self.tracks[best_id] = {"box": box, "age": 0, "needle": 0.5,
-                                        "history": deque(maxlen=SMOOTH_WINDOW)}
-            assigned.add(best_id)
-            self.tracks[best_id].update(box=box, age=0)
-            pairs.append((best_id, det_idx))
-
-        for tid in [t for t, v in self.tracks.items() if v["age"] > TRACK_MAX_AGE]:
-            del self.tracks[tid]
-        return pairs
-
-    def smooth(self, tid, probs):
-        history = self.tracks[tid]["history"]
-        history.append(probs)
-        return np.mean(history, axis=0)
-
-    def ease(self, tid, target):
-        """Rolling average already de-noises the value; this just stops the
-        marker from teleporting when a track first appears or a model drops."""
-        track = self.tracks[tid]
-        track["needle"] += (target - track["needle"]) * NEEDLE_EASE
-        return track["needle"]
-
-
-# ─────────────────────────── fusion ───────────────────────────
-
-def fuse(face_probs, face_conf, face_px, body_probs, body_conf):
-    """Confidence-weighted merge. Returns (probs, weights) or (None, None)."""
-    terms = []
-    if face_probs is not None:
-        size_factor = float(np.clip(face_px / FACE_REF_PX, 0.0, 1.0))
-        terms.append((face_conf * size_factor, face_probs))
-    if body_probs is not None:
-        terms.append((body_conf * BODY_DISCOUNT, body_probs))
-
-    terms = [(w, p) for w, p in terms if w > 0.01]
-    if not terms:
-        return None, None
-
-    total = sum(w for w, _ in terms)
-    fused = sum(w * p for w, p in terms) / total
-    return fused, [w / total for w, _ in terms]
 
 
 # ─────────────────────────── scale overlay ───────────────────────────

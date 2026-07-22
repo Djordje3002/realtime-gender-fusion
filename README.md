@@ -4,6 +4,7 @@
 
 **A research-oriented webcam demo that combines face and upper-body classifiers with confidence-weighted fusion, lightweight tracking, and temporal smoothing.**
 
+[![Core checks](https://github.com/Djordje3002/realtime-gender-fusion/actions/workflows/ci.yml/badge.svg)](https://github.com/Djordje3002/realtime-gender-fusion/actions/workflows/ci.yml)
 ![Python 3.10–3.12](https://img.shields.io/badge/Python-3.10%E2%80%933.12-3776AB?logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-inference-EE4C2C?logo=pytorch&logoColor=white)
 ![OpenCV](https://img.shields.io/badge/OpenCV-webcam-5C3EE8?logo=opencv&logoColor=white)
@@ -121,7 +122,7 @@ python train_body.py --data ./PA-100K --epochs 8
 
 The default output is `body_model.pt`. The loader supports both the original and common Kaggle directory layouts, and evaluation is split by front, side, and back viewpoints.
 
-> Keep `UPPER_FRACTION = 0.5` synchronized between `train_body.py` and `realtime_fused.py`. Training on full bodies and inferring on upper-body crops creates a severe domain mismatch.
+> Keep `UPPER_FRACTION = 0.5` in `train_body.py` synchronized with the default crop fraction in `fusion_core.py`. Training on full bodies and inferring on upper-body crops creates a severe domain mismatch.
 
 ## How fusion works
 
@@ -139,14 +140,17 @@ The tracker is intentionally small and dependency-free. It is suitable for a web
 ```text
 .
 ├── assets/                 README artwork
-├── realtime_fused.py       detection, fusion, tracking, and UI
+├── realtime_fused.py       detection, model inference, and UI
+├── fusion_core.py           tested geometry, fusion, and tracking logic
+├── tests/                   deterministic core behavior tests
 ├── webcam.py               minimal face-only webcam demo
 ├── mp_face.py              MediaPipe Tasks wrapper
 ├── camutil.py              cross-platform camera opening helper
 ├── train.py                UTKFace face-model training
 ├── train_body.py           PA-100K upper-body training
 ├── gender_model.pt         bundled face checkpoint
-└── requirements.txt        Python dependencies
+├── requirements.txt        runtime and training dependencies
+└── requirements-dev.txt    lightweight core-test dependencies
 ```
 
 ## Troubleshooting
