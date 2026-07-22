@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Local environments and editor files
+.venv/
+venv/
+.env
+.DS_Store
+.idea/
+.vscode/
+
+# Datasets (download these locally; never commit them)
+UTKFace/
+UTKFace.tar.gz
+PA-100K/
+PA100K/
+data/
+
+# Downloaded or locally trained model artifacts
+blaze_face_short_range.tflite
+yolov8*.pt
+body_model.pt
+runs/
+
+# Keep the small face checkpoint that powers the clone-and-run demo
+!gender_model.pt
